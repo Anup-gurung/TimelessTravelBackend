@@ -65,20 +65,34 @@ export const createItinerary = async (req, res) => {
       }
     });
 
-    const itinerary = new Itinerary({
+    // Build itinerary object conditionally
+    const itineraryData = {
       title: req.body.title,
       short_desc: req.body.short_desc,
       long_desc: req.body.long_desc,
       location: req.body.location,
-      category: req.body.category || null,
-      tour_type: req.body.tour_type || null,
       difficulty: req.body.difficulty,
       pricing: pricing,
-      start_date: new Date(req.body.start_date),
-      end_date: new Date(req.body.end_date),
       cover_image_url: cover_image_url,
       is_cover_img: req.body.is_cover_img === 'true'
-    });
+    };
+
+    // Only set dates if provided
+    if (req.body.start_date) {
+      itineraryData.start_date = new Date(req.body.start_date);
+    }
+    if (req.body.end_date) {
+      itineraryData.end_date = new Date(req.body.end_date);
+    }
+
+    // Only set category OR tour_type, not both
+    if (req.body.category) {
+      itineraryData.category = req.body.category;
+    } else if (req.body.tour_type) {
+      itineraryData.tour_type = req.body.tour_type;
+    }
+
+    const itinerary = new Itinerary(itineraryData);
 
     await itinerary.save();
     res.status(201).json(itinerary);
@@ -337,7 +351,7 @@ export const addDay = async (req, res) => {
     // 7. Create the day object
     const newDay = {
       dayNumber: req.body.day_number || itinerary.itinerary_days.length + 1,
-      title: req.body.day_title || '',
+      title: req.body.title || '',
       description: req.body.description,
       location: req.body.location || '',
       images: finalImages

@@ -52,8 +52,8 @@ const ItinerarySchema = new mongoose.Schema(
       tourCost: { type: Number, required: true } // Base tour cost
     },
 
-    start_date: { type: Date, required: true },
-    end_date: { type: Date, required: true },
+    start_date: { type: Date },
+    end_date: { type: Date },
 
     status: {
       type: String,
