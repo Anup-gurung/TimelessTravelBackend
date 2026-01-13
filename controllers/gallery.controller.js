@@ -26,13 +26,6 @@ const uploadToCloudinary = async (fileBuffer, mimeType) => {
 export const addGalleryEntry = async (req, res) => {
   try {
     const { place_name } = req.body;
-    
-    if (!place_name) {
-      return res.status(400).json({ 
-        success: false,
-        message: "Place name is required" 
-      });
-    }
 
     let uploadedImageUrl = null;
     if (req.file) {
