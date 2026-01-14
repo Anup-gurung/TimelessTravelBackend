@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const DayImageSchema = new mongoose.Schema({
   imageUrl: { type: String, required: true }
 });
-
+// Itinerary Day Schema
 const ItineraryDaySchema = new mongoose.Schema({
   dayNumber: { type: Number, required: true },
   title: { type: String },
@@ -12,6 +12,7 @@ const ItineraryDaySchema = new mongoose.Schema({
   images: [DayImageSchema]
 });
 
+// Main Itinerary Schema
 const ItinerarySchema = new mongoose.Schema(
   {
     title: { type: String, required: true },

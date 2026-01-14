@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-
+// Gallery Schema
 const gallerySchema = new mongoose.Schema({
   image_url: String,
   place_name: String,
