@@ -7,8 +7,13 @@ import testimonialRouter from "./routes/testimonail.route.js";
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
+app.options("*", cors());
 app.use("/api/auth", adminRoute);
 app.use("/api/itineraries", ItineraryRoute);
 app.use("/api/gallery", galleryRouter);
