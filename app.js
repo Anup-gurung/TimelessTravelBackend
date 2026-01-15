@@ -37,7 +37,7 @@ app.use(express.json());
 const allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  "https://YOUR-FRONTEND-DOMAIN.com", // <- put your real frontend domain
+  "https://timeless-travel-admin-frontend.vercel.app", // <- put your real frontend domain
 ];
 
 app.use(
