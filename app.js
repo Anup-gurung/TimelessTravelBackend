@@ -1,31 +1,7 @@
-// import express from "express";
-// import cors from "cors";
-// import adminRoute from "./routes/auth.routes.js";
-// import ItineraryRoute from "./routes/itinerary.auth.js";
-// import galleryRouter from "./routes/gallery.route.js";
-// import testimonialRouter from "./routes/testimonail.route.js";
-
-// const app = express();
-// app.use(express.json());
-// app.use(cors({
-//     origin: "*",
-//     methods: ["GET", "POST", "PUT", "DELETE"],
-//     allowedHeaders: ["Content-Type", "Authorization"]
-// }));
-
-// app.options("*", cors());
-// app.use("/api/auth", adminRoute);
-// app.use("/api/itineraries", ItineraryRoute);
-// app.use("/api/gallery", galleryRouter);
-// app.use("/api/testimonials", testimonialRouter);
-
-// export default app;
-
-
-
 
 import express from "express";
 import cors from "cors";
+
 import adminRoute from "./routes/auth.routes.js";
 import ItineraryRoute from "./routes/itinerary.auth.js";
 import galleryRouter from "./routes/gallery.route.js";
@@ -37,25 +13,22 @@ app.use(express.json());
 const allowedOrigins = [
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  "https://timeless-travel-admin-frontend.vercel.app", // <- put your real frontend domain
+  "https://timeless-travel-admin-frontend.vercel.app",
 ];
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      // allow Postman/server-to-server (no Origin header)
-      if (!origin) return cb(null, true);
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked: ${origin}`));
-    },
-    credentials: true, // ✅ only if you use cookies/auth
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-app.options("*", cors());
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions)); // ✅ DO NOT leave this as cors()
 
 app.use("/api/auth", adminRoute);
 app.use("/api/itineraries", ItineraryRoute);
@@ -63,3 +36,46 @@ app.use("/api/gallery", galleryRouter);
 app.use("/api/testimonials", testimonialRouter);
 
 export default app;
+
+
+
+// import express from "express";
+// import cors from "cors";
+// import adminRoute from "./routes/auth.routes.js";
+// import ItineraryRoute from "./routes/itinerary.auth.js";
+// import galleryRouter from "./routes/gallery.route.js";
+// import testimonialRouter from "./routes/testimonail.route.js";
+
+// const app = express();
+// app.use(express.json());
+
+// const allowedOrigins = [
+//   "http://localhost:3000",
+//   "http://127.0.0.1:3000",
+//   "https://timeless-travel-admin-frontend.vercel.app", // <- put your real frontend domain
+// ];
+
+// app.use(
+//   cors({
+//     origin: (origin, cb) => {
+//       // allow Postman/server-to-server (no Origin header)
+//       if (!origin) return cb(null, true);
+
+//       if (allowedOrigins.includes(origin)) return cb(null, true);
+//       return cb(new Error(`CORS blocked: ${origin}`));
+//     },
+//     credentials: true, // ✅ only if you use cookies/auth
+//     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+//     allowedHeaders: ["Content-Type", "Authorization"],
+//   })
+// );
+
+// app.use(cors(corsOptions));
+// app.options("*", cors(corsOptions));
+
+// app.use("/api/auth", adminRoute);
+// app.use("/api/itineraries", ItineraryRoute);
+// app.use("/api/gallery", galleryRouter);
+// app.use("/api/testimonials", testimonialRouter);
+
+// export default app;
