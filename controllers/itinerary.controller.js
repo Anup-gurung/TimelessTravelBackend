@@ -373,94 +373,190 @@ export const addDay = async (req, res) => {
   }
 };
 
+/**
+ * Update an existing day in an itinerary
+ * 
+ * @route PUT /api/itineraries/:id/days/:dayId
+ * 
+ * IMAGE UPDATE CONTRACT:
+ * - req.body.keep_images: JSON array (or array) of Cloudinary URLs to retain
+ * - req.body.remove_images: JSON array (or array) of Cloudinary URLs to delete
+ * - req.files.images: optional new image files to upload and append
+ * 
+ * RULES:
+ * 1. Base64 images are NOT allowed - returns 400 error
+ * 2. Start with keep_images (validated http/https URLs only)
+ * 3. Remove any URLs listed in remove_images
+ * 4. Upload and append new files from req.files.images
+ * 5. If no image parameters provided, keep existing images unchanged
+ * 6. Allow partial updates (title, description, location) without touching images
+ */
 export const updateDay = async (req, res) => {
   try {
+    // 1. Find itinerary
     const itinerary = await Itinerary.findById(req.params.id);
     if (!itinerary) {
       return res.status(404).json({ error: "Itinerary not found" });
     }
 
+    // 2. Find specific day
     const dayToUpdate = itinerary.itinerary_days.id(req.params.dayId);
     if (!dayToUpdate) {
       return res.status(404).json({ error: "Day not found" });
     }
 
-    let updatedImages = [];
-
-    // Handle new file uploads
-    if (req.files && req.files.images) {
-      const imageFiles = Array.isArray(req.files.images)
-        ? req.files.images
-        : [req.files.images];
-
-      for (const file of imageFiles) {
-        const b64 = Buffer.from(file.buffer).toString("base64");
-        const dataURI = `data:${file.mimetype};base64,${b64}`;
-
-        const uploadResult = await cloudinary.uploader.upload(dataURI, {
-          folder: "itineraries/days",
-          resource_type: "auto"
-        });
-
-        updatedImages.push({ imageUrl: uploadResult.secure_url });
-      }
-    }
-
-    // Handle body images (JSON string or array)
-    if (updatedImages.length === 0 && req.body.images) {
-      let parsedImages = [];
-
-      if (typeof req.body.images === 'string') {
+    // 3. Helper function to parse JSON safely
+    const parseJsonSafely = (value, fieldName) => {
+      if (!value) return null;
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string') {
         try {
-          parsedImages = JSON.parse(req.body.images);
-          if (!Array.isArray(parsedImages)) {
-            return res.status(400).json({
-              error: "Images must be an array"
-            });
+          const parsed = JSON.parse(value);
+          if (!Array.isArray(parsed)) {
+            throw new Error(`${fieldName} must be an array`);
           }
+          return parsed;
         } catch (e) {
-          return res.status(400).json({
-            error: "Failed to parse images JSON: " + e.message
-          });
+          throw new Error(`Invalid JSON in ${fieldName}: ${e.message}`);
         }
-      } else if (Array.isArray(req.body.images)) {
-        parsedImages = req.body.images;
       }
+      throw new Error(`${fieldName} must be an array or JSON string`);
+    };
 
-      // Process each image
-      for (const img of parsedImages) {
-        if (typeof img === 'string') {
-          if (img.startsWith('data:image/')) {
-            const uploadResult = await cloudinary.uploader.upload(img, {
-              folder: "itineraries/days",
-              resource_type: "auto"
-            });
-            updatedImages.push({ imageUrl: uploadResult.secure_url });
-          } else {
-            updatedImages.push({ imageUrl: img });
-          }
-        } else if (img && typeof img === 'object' && img.imageUrl) {
-          if (img.imageUrl.startsWith('data:image/')) {
-            const uploadResult = await cloudinary.uploader.upload(img.imageUrl, {
-              folder: "itineraries/days",
-              resource_type: "auto"
-            });
-            updatedImages.push({ imageUrl: uploadResult.secure_url });
-          } else {
-            updatedImages.push({ imageUrl: img.imageUrl });
-          }
-        }
+    // 4. Helper function to validate URL
+    const isValidUrl = (str) => {
+      if (typeof str !== 'string') return false;
+      return str.startsWith('http://') || str.startsWith('https://');
+    };
+
+    // 5. Check for base64 images (NOT ALLOWED)
+    const checkForBase64 = (data) => {
+      if (!data) return false;
+      if (typeof data === 'string' && data.startsWith('data:image/')) return true;
+      if (Array.isArray(data)) {
+        return data.some(item => {
+          if (typeof item === 'string' && item.startsWith('data:image/')) return true;
+          if (item && typeof item === 'object' && item.imageUrl && item.imageUrl.startsWith('data:image/')) return true;
+          return false;
+        });
       }
+      return false;
+    };
+
+    // Check all possible sources for base64
+    if (checkForBase64(req.body.keep_images) || 
+        checkForBase64(req.body.remove_images) ||
+        checkForBase64(req.body.images)) {
+      return res.status(400).json({
+        error: "Base64 images are not allowed in updateDay",
+        message: "Please upload images as files or provide Cloudinary URLs only"
+      });
     }
 
-    // Update day fields
-    if (req.body.title !== undefined) dayToUpdate.title = req.body.title;
-    if (req.body.description !== undefined) dayToUpdate.description = req.body.description;
-    if (req.body.location !== undefined) dayToUpdate.location = req.body.location;
-    if (updatedImages.length > 0) dayToUpdate.images = updatedImages;
+    // 6. Parse keep_images and remove_images
+    let keepImages = null;
+    let removeImages = null;
 
+    try {
+      if (req.body.keep_images !== undefined) {
+        keepImages = parseJsonSafely(req.body.keep_images, 'keep_images');
+      }
+      if (req.body.remove_images !== undefined) {
+        removeImages = parseJsonSafely(req.body.remove_images, 'remove_images');
+      }
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+
+    // 7. Determine if we should update images
+    const shouldUpdateImages = keepImages !== null || 
+                               removeImages !== null || 
+                               (req.files && req.files.images);
+
+    let finalImages = [];
+
+    if (shouldUpdateImages) {
+      // 8. Start with keep_images (validate URLs)
+      if (keepImages && keepImages.length > 0) {
+        for (const url of keepImages) {
+          if (!isValidUrl(url)) {
+            return res.status(400).json({
+              error: `Invalid URL in keep_images: ${url}`,
+              message: "Only http:// or https:// URLs are allowed"
+            });
+          }
+          finalImages.push(url);
+        }
+      }
+
+      // 9. Remove URLs listed in remove_images
+      if (removeImages && removeImages.length > 0) {
+        // Validate remove_images URLs
+        for (const url of removeImages) {
+          if (!isValidUrl(url)) {
+            return res.status(400).json({
+              error: `Invalid URL in remove_images: ${url}`,
+              message: "Only http:// or https:// URLs are allowed"
+            });
+          }
+        }
+        // Filter out removed images
+        finalImages = finalImages.filter(url => !removeImages.includes(url));
+      }
+
+      // 10. Upload new files and append to finalImages
+      if (req.files && req.files.images) {
+        const imageFiles = Array.isArray(req.files.images)
+          ? req.files.images
+          : [req.files.images];
+
+        for (const file of imageFiles) {
+          try {
+            const b64 = Buffer.from(file.buffer).toString("base64");
+            const dataURI = `data:${file.mimetype};base64,${b64}`;
+
+            const uploadResult = await cloudinary.uploader.upload(dataURI, {
+              folder: "itineraries/days",
+              resource_type: "auto"
+            });
+
+            finalImages.push(uploadResult.secure_url);
+          } catch (uploadErr) {
+            console.error("Cloudinary upload error:", uploadErr);
+            return res.status(500).json({
+              error: "Failed to upload image to Cloudinary",
+              details: uploadErr.message
+            });
+          }
+        }
+      }
+
+      // 11. Set images ONLY ONCE in the correct format
+      dayToUpdate.images = finalImages.map(url => ({ imageUrl: url }));
+    }
+
+    // 12. Update other fields (allow partial updates)
+    if (req.body.title !== undefined) {
+      dayToUpdate.title = req.body.title;
+    }
+    if (req.body.description !== undefined) {
+      dayToUpdate.description = req.body.description;
+    }
+    if (req.body.location !== undefined) {
+      dayToUpdate.location = req.body.location;
+    }
+
+    // 13. Save to database
     await itinerary.save();
-    res.json(itinerary);
+
+    // 14. Return success response
+    res.json({
+      success: true,
+      day: dayToUpdate,
+      images: dayToUpdate.images,
+      message: "Day updated successfully"
+    });
+
   } catch (err) {
     console.error("Update day error:", err);
     res.status(500).json({
