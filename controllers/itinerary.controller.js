@@ -410,8 +410,23 @@ export const updateDay = async (req, res) => {
     }
     
     console.log(`[UPDATE DAY] Found day - Current images count: ${dayToUpdate.images?.length || 0}`);
+    if (dayToUpdate.images && dayToUpdate.images.length > 0) {
+      console.log('[UPDATE DAY] Current images:', JSON.stringify(dayToUpdate.images, null, 2));
+    }
     console.log(`[UPDATE DAY] Request body keys: ${Object.keys(req.body).join(', ')}`);
+    console.log('[UPDATE DAY] Request body values:');
+    console.log(`  - title: ${req.body.title !== undefined ? `"${req.body.title}"` : 'not provided'}`);
+    console.log(`  - description: ${req.body.description !== undefined ? `"${req.body.description?.substring(0, 50)}..."` : 'not provided'}`);
+    console.log(`  - location: ${req.body.location !== undefined ? `"${req.body.location}"` : 'not provided'}`);
+    console.log(`  - keep_images: ${req.body.keep_images !== undefined ? (typeof req.body.keep_images === 'string' ? `JSON string (length: ${req.body.keep_images.length})` : 'array') : 'not provided'}`);
+    console.log(`  - remove_images: ${req.body.remove_images !== undefined ? (typeof req.body.remove_images === 'string' ? `JSON string (length: ${req.body.remove_images.length})` : 'array') : 'not provided'}`);
     console.log(`[UPDATE DAY] Request files: ${req.files?.images ? req.files.images.length : 0} new file(s)`);
+    if (req.files?.images) {
+      const fileNames = Array.isArray(req.files.images) 
+        ? req.files.images.map(f => f.originalname || 'unnamed').join(', ')
+        : req.files.images.originalname || 'unnamed';
+      console.log(`[UPDATE DAY] File names: ${fileNames}`);
+    }
 
     // 3. Helper function to parse JSON safely
     const parseJsonSafely = (value, fieldName) => {
@@ -468,12 +483,25 @@ export const updateDay = async (req, res) => {
 
     try {
       if (req.body.keep_images !== undefined) {
+        console.log('[UPDATE DAY] Parsing keep_images...');
         keepImages = parseJsonSafely(req.body.keep_images, 'keep_images');
         console.log(`[UPDATE DAY] keep_images parsed: ${keepImages?.length || 0} URL(s)`);
+        if (keepImages && keepImages.length > 0) {
+          console.log('[UPDATE DAY] keep_images content:', JSON.stringify(keepImages, null, 2));
+        }
+      } else {
+        console.log('[UPDATE DAY] keep_images: not provided in request');
       }
+      
       if (req.body.remove_images !== undefined) {
+        console.log('[UPDATE DAY] Parsing remove_images...');
         removeImages = parseJsonSafely(req.body.remove_images, 'remove_images');
         console.log(`[UPDATE DAY] remove_images parsed: ${removeImages?.length || 0} URL(s)`);
+        if (removeImages && removeImages.length > 0) {
+          console.log('[UPDATE DAY] remove_images content:', JSON.stringify(removeImages, null, 2));
+        }
+      } else {
+        console.log('[UPDATE DAY] remove_images: not provided in request');
       }
     } catch (e) {
       console.error(`[UPDATE DAY ERROR] JSON parsing failed: ${e.message}`);
@@ -481,9 +509,16 @@ export const updateDay = async (req, res) => {
     }
 
     // 7. Determine if we should update images
+    console.log('[UPDATE DAY] Determining if images should be updated:');
+    console.log(`  - keepImages !== null: ${keepImages !== null}`);
+    console.log(`  - removeImages !== null: ${removeImages !== null}`);
+    console.log(`  - req.files && req.files.images: ${!!(req.files && req.files.images)}`);
+    
     const shouldUpdateImages = keepImages !== null || 
                                removeImages !== null || 
                                (req.files && req.files.images);
+    
+    console.log(`[UPDATE DAY] shouldUpdateImages = ${shouldUpdateImages}`);
 
     let finalImages = [];
 
@@ -495,7 +530,9 @@ export const updateDay = async (req, res) => {
         // keep_images was explicitly provided, use it (even if empty)
         console.log(`[UPDATE DAY] Using explicit keep_images: ${keepImages.length} URL(s)`);
         if (keepImages.length > 0) {
-          for (const url of keepImages) {
+          for (let i = 0; i < keepImages.length; i++) {
+            const url = keepImages[i];
+            console.log(`[UPDATE DAY] Validating keep_images[${i}]: ${url}`);
             if (!isValidUrl(url)) {
               console.error(`[UPDATE DAY ERROR] Invalid URL in keep_images: ${url}`);
               return res.status(400).json({
@@ -504,18 +541,45 @@ export const updateDay = async (req, res) => {
               });
             }
             finalImages.push(url);
+            console.log(`[UPDATE DAY] ✓ Added to finalImages: ${url}`);
           }
+        } else {
+          console.log('[UPDATE DAY] keep_images is empty array - will start with no images');
         }
       } else {
         // keep_images not provided, start with existing images
         console.log('[UPDATE DAY] No keep_images provided, starting with existing images');
         if (dayToUpdate.images && Array.isArray(dayToUpdate.images)) {
-          finalImages = dayToUpdate.images.map(img => {
-            if (typeof img === 'string') return img;
-            if (img && img.imageUrl) return img.imageUrl;
-            return null;
-          }).filter(url => url && isValidUrl(url));
+          console.log(`[UPDATE DAY] Processing ${dayToUpdate.images.length} existing images...`);
+          finalImages = dayToUpdate.images.map((img, idx) => {
+            let url = null;
+            if (typeof img === 'string') {
+              url = img;
+              console.log(`[UPDATE DAY] Existing image[${idx}] is string: ${url}`);
+            } else if (img && img.imageUrl) {
+              url = img.imageUrl;
+              console.log(`[UPDATE DAY] Existing image[${idx}] is object with imageUrl: ${url}`);
+            } else {
+              console.log(`[UPDATE DAY] Existing image[${idx}] is invalid format:`, img);
+            }
+            return url;
+          }).filter(url => {
+            if (!url) {
+              console.log('[UPDATE DAY] Filtered out null/undefined URL');
+              return false;
+            }
+            if (!isValidUrl(url)) {
+              console.log(`[UPDATE DAY] Filtered out invalid URL: ${url}`);
+              return false;
+            }
+            return true;
+          });
           console.log(`[UPDATE DAY] Loaded ${finalImages.length} existing image(s)`);
+          if (finalImages.length > 0) {
+            console.log('[UPDATE DAY] finalImages after loading existing:', JSON.stringify(finalImages, null, 2));
+          }
+        } else {
+          console.log('[UPDATE DAY] No existing images found or images is not an array');
         }
       }
 
@@ -574,10 +638,20 @@ export const updateDay = async (req, res) => {
       }
 
       // 11. Set images ONLY ONCE in the correct format
+      console.log(`[UPDATE DAY] About to set images. finalImages array has ${finalImages.length} URL(s)`);
+      if (finalImages.length > 0) {
+        console.log('[UPDATE DAY] finalImages before mapping:', JSON.stringify(finalImages, null, 2));
+      }
+      
       dayToUpdate.images = finalImages.map(url => ({ imageUrl: url }));
+      
       console.log(`[UPDATE DAY] Final images set: ${dayToUpdate.images.length} image(s)`);
+      if (dayToUpdate.images.length > 0) {
+        console.log('[UPDATE DAY] dayToUpdate.images after setting:', JSON.stringify(dayToUpdate.images, null, 2));
+      }
     } else {
       console.log('[UPDATE DAY] No image updates requested, keeping existing images');
+      console.log(`[UPDATE DAY] Existing images count: ${dayToUpdate.images?.length || 0}`);
     }
 
     // 12. Update other fields (allow partial updates)
