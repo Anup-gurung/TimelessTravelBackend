@@ -393,17 +393,25 @@ export const addDay = async (req, res) => {
  */
 export const updateDay = async (req, res) => {
   try {
+    console.log(`[UPDATE DAY] Starting update for itinerary: ${req.params.id}, day: ${req.params.dayId}`);
+    
     // 1. Find itinerary
     const itinerary = await Itinerary.findById(req.params.id);
     if (!itinerary) {
+      console.error(`[UPDATE DAY ERROR] Itinerary not found: ${req.params.id}`);
       return res.status(404).json({ error: "Itinerary not found" });
     }
 
     // 2. Find specific day
     const dayToUpdate = itinerary.itinerary_days.id(req.params.dayId);
     if (!dayToUpdate) {
+      console.error(`[UPDATE DAY ERROR] Day not found: ${req.params.dayId}`);
       return res.status(404).json({ error: "Day not found" });
     }
+    
+    console.log(`[UPDATE DAY] Found day - Current images count: ${dayToUpdate.images?.length || 0}`);
+    console.log(`[UPDATE DAY] Request body keys: ${Object.keys(req.body).join(', ')}`);
+    console.log(`[UPDATE DAY] Request files: ${req.files?.images ? req.files.images.length : 0} new file(s)`);
 
     // 3. Helper function to parse JSON safely
     const parseJsonSafely = (value, fieldName) => {
@@ -447,6 +455,7 @@ export const updateDay = async (req, res) => {
     if (checkForBase64(req.body.keep_images) || 
         checkForBase64(req.body.remove_images) ||
         checkForBase64(req.body.images)) {
+      console.error('[UPDATE DAY ERROR] Base64 image detected in request');
       return res.status(400).json({
         error: "Base64 images are not allowed in updateDay",
         message: "Please upload images as files or provide Cloudinary URLs only"
@@ -460,11 +469,14 @@ export const updateDay = async (req, res) => {
     try {
       if (req.body.keep_images !== undefined) {
         keepImages = parseJsonSafely(req.body.keep_images, 'keep_images');
+        console.log(`[UPDATE DAY] keep_images parsed: ${keepImages?.length || 0} URL(s)`);
       }
       if (req.body.remove_images !== undefined) {
         removeImages = parseJsonSafely(req.body.remove_images, 'remove_images');
+        console.log(`[UPDATE DAY] remove_images parsed: ${removeImages?.length || 0} URL(s)`);
       }
     } catch (e) {
+      console.error(`[UPDATE DAY ERROR] JSON parsing failed: ${e.message}`);
       return res.status(400).json({ error: e.message });
     }
 
@@ -476,32 +488,57 @@ export const updateDay = async (req, res) => {
     let finalImages = [];
 
     if (shouldUpdateImages) {
-      // 8. Start with keep_images (validate URLs)
-      if (keepImages && keepImages.length > 0) {
-        for (const url of keepImages) {
-          if (!isValidUrl(url)) {
-            return res.status(400).json({
-              error: `Invalid URL in keep_images: ${url}`,
-              message: "Only http:// or https:// URLs are allowed"
-            });
+      console.log('[UPDATE DAY] Processing image updates...');
+      
+      // 8. Start with keep_images OR existing images if keep_images not provided
+      if (keepImages !== null) {
+        // keep_images was explicitly provided, use it (even if empty)
+        console.log(`[UPDATE DAY] Using explicit keep_images: ${keepImages.length} URL(s)`);
+        if (keepImages.length > 0) {
+          for (const url of keepImages) {
+            if (!isValidUrl(url)) {
+              console.error(`[UPDATE DAY ERROR] Invalid URL in keep_images: ${url}`);
+              return res.status(400).json({
+                error: `Invalid URL in keep_images: ${url}`,
+                message: "Only http:// or https:// URLs are allowed"
+              });
+            }
+            finalImages.push(url);
           }
-          finalImages.push(url);
+        }
+      } else {
+        // keep_images not provided, start with existing images
+        console.log('[UPDATE DAY] No keep_images provided, starting with existing images');
+        if (dayToUpdate.images && Array.isArray(dayToUpdate.images)) {
+          finalImages = dayToUpdate.images.map(img => {
+            if (typeof img === 'string') return img;
+            if (img && img.imageUrl) return img.imageUrl;
+            return null;
+          }).filter(url => url && isValidUrl(url));
+          console.log(`[UPDATE DAY] Loaded ${finalImages.length} existing image(s)`);
         }
       }
 
       // 9. Remove URLs listed in remove_images
       if (removeImages && removeImages.length > 0) {
+        console.log(`[UPDATE DAY] Processing remove_images: ${removeImages.length} URL(s) to remove`);
+        const beforeCount = finalImages.length;
+        
         // Validate remove_images URLs
         for (const url of removeImages) {
           if (!isValidUrl(url)) {
+            console.error(`[UPDATE DAY ERROR] Invalid URL in remove_images: ${url}`);
             return res.status(400).json({
               error: `Invalid URL in remove_images: ${url}`,
               message: "Only http:// or https:// URLs are allowed"
             });
           }
         }
+        
         // Filter out removed images
         finalImages = finalImages.filter(url => !removeImages.includes(url));
+        const removedCount = beforeCount - finalImages.length;
+        console.log(`[UPDATE DAY] Removed ${removedCount} image(s), ${finalImages.length} remaining`);
       }
 
       // 10. Upload new files and append to finalImages
@@ -509,9 +546,13 @@ export const updateDay = async (req, res) => {
         const imageFiles = Array.isArray(req.files.images)
           ? req.files.images
           : [req.files.images];
+        
+        console.log(`[UPDATE DAY] Uploading ${imageFiles.length} new file(s) to Cloudinary...`);
 
-        for (const file of imageFiles) {
+        for (let i = 0; i < imageFiles.length; i++) {
+          const file = imageFiles[i];
           try {
+            console.log(`[UPDATE DAY] Uploading file ${i + 1}/${imageFiles.length}: ${file.originalname || 'unnamed'}`);
             const b64 = Buffer.from(file.buffer).toString("base64");
             const dataURI = `data:${file.mimetype};base64,${b64}`;
 
@@ -521,8 +562,9 @@ export const updateDay = async (req, res) => {
             });
 
             finalImages.push(uploadResult.secure_url);
+            console.log(`[UPDATE DAY] ✓ File ${i + 1} uploaded successfully: ${uploadResult.secure_url}`);
           } catch (uploadErr) {
-            console.error("Cloudinary upload error:", uploadErr);
+            console.error(`[UPDATE DAY ERROR] Cloudinary upload failed for file ${i + 1}:`, uploadErr);
             return res.status(500).json({
               error: "Failed to upload image to Cloudinary",
               details: uploadErr.message
@@ -533,21 +575,33 @@ export const updateDay = async (req, res) => {
 
       // 11. Set images ONLY ONCE in the correct format
       dayToUpdate.images = finalImages.map(url => ({ imageUrl: url }));
+      console.log(`[UPDATE DAY] Final images set: ${dayToUpdate.images.length} image(s)`);
+    } else {
+      console.log('[UPDATE DAY] No image updates requested, keeping existing images');
     }
 
     // 12. Update other fields (allow partial updates)
+    const updatedFields = [];
     if (req.body.title !== undefined) {
       dayToUpdate.title = req.body.title;
+      updatedFields.push('title');
     }
     if (req.body.description !== undefined) {
       dayToUpdate.description = req.body.description;
+      updatedFields.push('description');
     }
     if (req.body.location !== undefined) {
       dayToUpdate.location = req.body.location;
+      updatedFields.push('location');
+    }
+    
+    if (updatedFields.length > 0) {
+      console.log(`[UPDATE DAY] Updated fields: ${updatedFields.join(', ')}`);
     }
 
     // 13. Save to database
     await itinerary.save();
+    console.log(`[UPDATE DAY] ✓ Day updated successfully in database`);
 
     // 14. Return success response
     res.json({
@@ -558,7 +612,8 @@ export const updateDay = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("Update day error:", err);
+    console.error("[UPDATE DAY ERROR] Fatal error:", err);
+    console.error("[UPDATE DAY ERROR] Stack trace:", err.stack);
     res.status(500).json({
       error: "Failed to update day",
       details: err.message
