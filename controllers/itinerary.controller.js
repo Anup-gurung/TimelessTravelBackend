@@ -379,17 +379,18 @@ export const addDay = async (req, res) => {
  * @route PUT /api/itineraries/:id/days/:dayId
  * 
  * IMAGE UPDATE CONTRACT:
- * - req.body.keep_images: JSON array (or array) of Cloudinary URLs to retain
- * - req.body.remove_images: JSON array (or array) of Cloudinary URLs to delete
- * - req.files.images: optional new image files to upload and append
+ * - req.body.keep_images: JSON array (or array) of Cloudinary URLs (strings) to KEEP
+ * - req.body.remove_images: JSON array (or array) of Cloudinary URLs (strings) to REMOVE
+ * - req.files.images: optional new image files to upload and APPEND
  * 
  * RULES:
- * 1. Base64 images are NOT allowed - returns 400 error
- * 2. Start with keep_images (validated http/https URLs only)
- * 3. Remove any URLs listed in remove_images
- * 4. Upload and append new files from req.files.images
+ * 1. Base64 images are NOT allowed in updateDay - returns 400 error
+ * 2. If keep_images provided, start from it; else start from existing day images
+ * 3. Remove URLs listed in remove_images
+ * 4. Upload new files and append their Cloudinary URLs
  * 5. If no image parameters provided, keep existing images unchanged
- * 6. Allow partial updates (title, description, location) without touching images
+ * 6. Allow partial updates (title, description, location, day_number/dayNumber) without touching images
+ * 7. Store images in MongoDB as [{ imageUrl: string }]
  */
 export const updateDay = async (req, res) => {
   try {
@@ -410,23 +411,8 @@ export const updateDay = async (req, res) => {
     }
     
     console.log(`[UPDATE DAY] Found day - Current images count: ${dayToUpdate.images?.length || 0}`);
-    if (dayToUpdate.images && dayToUpdate.images.length > 0) {
-      console.log('[UPDATE DAY] Current images:', JSON.stringify(dayToUpdate.images, null, 2));
-    }
     console.log(`[UPDATE DAY] Request body keys: ${Object.keys(req.body).join(', ')}`);
-    console.log('[UPDATE DAY] Request body values:');
-    console.log(`  - title: ${req.body.title !== undefined ? `"${req.body.title}"` : 'not provided'}`);
-    console.log(`  - description: ${req.body.description !== undefined ? `"${req.body.description?.substring(0, 50)}..."` : 'not provided'}`);
-    console.log(`  - location: ${req.body.location !== undefined ? `"${req.body.location}"` : 'not provided'}`);
-    console.log(`  - keep_images: ${req.body.keep_images !== undefined ? (typeof req.body.keep_images === 'string' ? `JSON string (length: ${req.body.keep_images.length})` : 'array') : 'not provided'}`);
-    console.log(`  - remove_images: ${req.body.remove_images !== undefined ? (typeof req.body.remove_images === 'string' ? `JSON string (length: ${req.body.remove_images.length})` : 'array') : 'not provided'}`);
-    console.log(`[UPDATE DAY] Request files: ${req.files?.images ? req.files.images.length : 0} new file(s)`);
-    if (req.files?.images) {
-      const fileNames = Array.isArray(req.files.images) 
-        ? req.files.images.map(f => f.originalname || 'unnamed').join(', ')
-        : req.files.images.originalname || 'unnamed';
-      console.log(`[UPDATE DAY] File names: ${fileNames}`);
-    }
+    console.log(`[UPDATE DAY] Request files: ${req.files?.images ? (Array.isArray(req.files.images) ? req.files.images.length : 1) : 0} new file(s)`);
 
     // 3. Helper function to parse JSON safely
     const parseJsonSafely = (value, fieldName) => {
@@ -446,13 +432,7 @@ export const updateDay = async (req, res) => {
       throw new Error(`${fieldName} must be an array or JSON string`);
     };
 
-    // 4. Helper function to validate URL
-    const isValidUrl = (str) => {
-      if (typeof str !== 'string') return false;
-      return str.startsWith('http://') || str.startsWith('https://');
-    };
-
-    // 5. Helper function to normalize URL (accepts string or { imageUrl } object)
+    // 4. Helper function to normalize URL (accepts string or { imageUrl } object)
     const normalizeToUrl = (item) => {
       if (typeof item === 'string') {
         return item;
@@ -461,6 +441,12 @@ export const updateDay = async (req, res) => {
         return item.imageUrl;
       }
       return null;
+    };
+
+    // 5. Helper function to validate URL
+    const isValidUrl = (str) => {
+      if (typeof str !== 'string') return false;
+      return str.startsWith('http://') || str.startsWith('https://');
     };
 
     // 6. Check for base64 images (NOT ALLOWED)
@@ -499,9 +485,6 @@ export const updateDay = async (req, res) => {
         // Normalize to URL strings (accept both string and { imageUrl } object)
         keepImages = keepImages.map(item => normalizeToUrl(item)).filter(url => url !== null);
         console.log(`[UPDATE DAY] keep_images parsed and normalized: ${keepImages?.length || 0} URL(s)`);
-        if (keepImages && keepImages.length > 0) {
-          console.log('[UPDATE DAY] keep_images content:', JSON.stringify(keepImages, null, 2));
-        }
       } else {
         console.log('[UPDATE DAY] keep_images: not provided in request');
       }
@@ -512,9 +495,6 @@ export const updateDay = async (req, res) => {
         // Normalize to URL strings (accept both string and { imageUrl } object)
         removeImages = removeImages.map(item => normalizeToUrl(item)).filter(url => url !== null);
         console.log(`[UPDATE DAY] remove_images parsed and normalized: ${removeImages?.length || 0} URL(s)`);
-        if (removeImages && removeImages.length > 0) {
-          console.log('[UPDATE DAY] remove_images content:', JSON.stringify(removeImages, null, 2));
-        }
       } else {
         console.log('[UPDATE DAY] remove_images: not provided in request');
       }
@@ -524,11 +504,6 @@ export const updateDay = async (req, res) => {
     }
 
     // 8. Determine if we should update images
-    console.log('[UPDATE DAY] Determining if images should be updated:');
-    console.log(`  - keepImages !== null: ${keepImages !== null}`);
-    console.log(`  - removeImages !== null: ${removeImages !== null}`);
-    console.log(`  - req.files && req.files.images: ${!!(req.files && req.files.images)}`);
-    
     const shouldUpdateImages = keepImages !== null || 
                                removeImages !== null || 
                                (req.files && req.files.images);
@@ -544,53 +519,25 @@ export const updateDay = async (req, res) => {
       if (keepImages !== null) {
         // keep_images was explicitly provided, use it (even if empty)
         console.log(`[UPDATE DAY] Using explicit keep_images: ${keepImages.length} URL(s)`);
-        if (keepImages.length > 0) {
-          for (let i = 0; i < keepImages.length; i++) {
-            const url = keepImages[i];
-            console.log(`[UPDATE DAY] Validating keep_images[${i}]: ${url}`);
-            if (!isValidUrl(url)) {
-              console.error(`[UPDATE DAY ERROR] Invalid URL in keep_images: ${url}`);
-              return res.status(400).json({
-                error: `Invalid URL in keep_images: ${url}`,
-                message: "Only http:// or https:// URLs are allowed"
-              });
-            }
-            finalImages.push(url);
-            console.log(`[UPDATE DAY] ✓ Added to finalImages: ${url}`);
+        for (const url of keepImages) {
+          if (!isValidUrl(url)) {
+            console.error(`[UPDATE DAY ERROR] Invalid URL in keep_images: ${url}`);
+            return res.status(400).json({
+              error: `Invalid URL in keep_images: ${url}`,
+              message: "Only http:// or https:// URLs are allowed"
+            });
           }
-        } else {
-          console.log('[UPDATE DAY] keep_images is empty array - will start with no images');
+          finalImages.push(url);
         }
       } else {
         // keep_images not provided, start with existing images
         console.log('[UPDATE DAY] No keep_images provided, starting with existing images');
         if (dayToUpdate.images && Array.isArray(dayToUpdate.images)) {
           console.log(`[UPDATE DAY] Processing ${dayToUpdate.images.length} existing images...`);
-          finalImages = dayToUpdate.images.map((img, idx) => {
-            const url = normalizeToUrl(img);
-            if (url) {
-              console.log(`[UPDATE DAY] Existing image[${idx}] normalized to: ${url}`);
-            } else {
-              console.log(`[UPDATE DAY] Existing image[${idx}] is invalid format:`, img);
-            }
-            return url;
-          }).filter(url => {
-            if (!url) {
-              console.log('[UPDATE DAY] Filtered out null/undefined URL');
-              return false;
-            }
-            if (!isValidUrl(url)) {
-              console.log(`[UPDATE DAY] Filtered out invalid URL: ${url}`);
-              return false;
-            }
-            return true;
-          });
+          finalImages = dayToUpdate.images
+            .map(img => normalizeToUrl(img))
+            .filter(url => url && isValidUrl(url));
           console.log(`[UPDATE DAY] Loaded ${finalImages.length} existing image(s)`);
-          if (finalImages.length > 0) {
-            console.log('[UPDATE DAY] finalImages after loading existing:', JSON.stringify(finalImages, null, 2));
-          }
-        } else {
-          console.log('[UPDATE DAY] No existing images found or images is not an array');
         }
       }
 
@@ -648,25 +595,17 @@ export const updateDay = async (req, res) => {
         }
       }
 
-      // 12. Set images in the correct MongoDB schema format: [{ imageUrl: string }]
-      console.log(`[UPDATE DAY] About to set images. finalImages array has ${finalImages.length} URL(s)`);
-      if (finalImages.length > 0) {
-        console.log('[UPDATE DAY] finalImages before mapping:', JSON.stringify(finalImages, null, 2));
-      }
-      
+      // 12. Set images in MongoDB schema format: [{ imageUrl: string }]
+      console.log(`[UPDATE DAY] Setting ${finalImages.length} image(s) in MongoDB format`);
       dayToUpdate.images = finalImages.map(url => ({ imageUrl: url }));
-      
-      console.log(`[UPDATE DAY] Final images set: ${dayToUpdate.images.length} image(s)`);
-      if (dayToUpdate.images.length > 0) {
-        console.log('[UPDATE DAY] dayToUpdate.images after setting:', JSON.stringify(dayToUpdate.images, null, 2));
-      }
+      console.log(`[UPDATE DAY] Images updated: before=${dayToUpdate.images?.length || 0}, after=${finalImages.length}`);
     } else {
       console.log('[UPDATE DAY] No image updates requested, keeping existing images');
-      console.log(`[UPDATE DAY] Existing images count: ${dayToUpdate.images?.length || 0}`);
     }
 
-    // 13. Update other fields (allow partial updates)
+    // 13. Update content fields (allow partial updates)
     const updatedFields = [];
+    
     if (req.body.title !== undefined) {
       dayToUpdate.title = req.body.title;
       updatedFields.push('title');
@@ -678,6 +617,15 @@ export const updateDay = async (req, res) => {
     if (req.body.location !== undefined) {
       dayToUpdate.location = req.body.location;
       updatedFields.push('location');
+    }
+    
+    // Support both day_number (frontend) and dayNumber (schema)
+    if (req.body.day_number !== undefined) {
+      dayToUpdate.dayNumber = Number(req.body.day_number);
+      updatedFields.push('dayNumber (from day_number)');
+    } else if (req.body.dayNumber !== undefined) {
+      dayToUpdate.dayNumber = Number(req.body.dayNumber);
+      updatedFields.push('dayNumber');
     }
     
     if (updatedFields.length > 0) {
