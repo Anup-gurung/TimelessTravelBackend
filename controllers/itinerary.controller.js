@@ -452,7 +452,18 @@ export const updateDay = async (req, res) => {
       return str.startsWith('http://') || str.startsWith('https://');
     };
 
-    // 5. Check for base64 images (NOT ALLOWED)
+    // 5. Helper function to normalize URL (accepts string or { imageUrl } object)
+    const normalizeToUrl = (item) => {
+      if (typeof item === 'string') {
+        return item;
+      }
+      if (item && typeof item === 'object' && item.imageUrl && typeof item.imageUrl === 'string') {
+        return item.imageUrl;
+      }
+      return null;
+    };
+
+    // 6. Check for base64 images (NOT ALLOWED)
     const checkForBase64 = (data) => {
       if (!data) return false;
       if (typeof data === 'string' && data.startsWith('data:image/')) return true;
@@ -477,7 +488,7 @@ export const updateDay = async (req, res) => {
       });
     }
 
-    // 6. Parse keep_images and remove_images
+    // 7. Parse keep_images and remove_images
     let keepImages = null;
     let removeImages = null;
 
@@ -485,7 +496,9 @@ export const updateDay = async (req, res) => {
       if (req.body.keep_images !== undefined) {
         console.log('[UPDATE DAY] Parsing keep_images...');
         keepImages = parseJsonSafely(req.body.keep_images, 'keep_images');
-        console.log(`[UPDATE DAY] keep_images parsed: ${keepImages?.length || 0} URL(s)`);
+        // Normalize to URL strings (accept both string and { imageUrl } object)
+        keepImages = keepImages.map(item => normalizeToUrl(item)).filter(url => url !== null);
+        console.log(`[UPDATE DAY] keep_images parsed and normalized: ${keepImages?.length || 0} URL(s)`);
         if (keepImages && keepImages.length > 0) {
           console.log('[UPDATE DAY] keep_images content:', JSON.stringify(keepImages, null, 2));
         }
@@ -496,7 +509,9 @@ export const updateDay = async (req, res) => {
       if (req.body.remove_images !== undefined) {
         console.log('[UPDATE DAY] Parsing remove_images...');
         removeImages = parseJsonSafely(req.body.remove_images, 'remove_images');
-        console.log(`[UPDATE DAY] remove_images parsed: ${removeImages?.length || 0} URL(s)`);
+        // Normalize to URL strings (accept both string and { imageUrl } object)
+        removeImages = removeImages.map(item => normalizeToUrl(item)).filter(url => url !== null);
+        console.log(`[UPDATE DAY] remove_images parsed and normalized: ${removeImages?.length || 0} URL(s)`);
         if (removeImages && removeImages.length > 0) {
           console.log('[UPDATE DAY] remove_images content:', JSON.stringify(removeImages, null, 2));
         }
@@ -508,7 +523,7 @@ export const updateDay = async (req, res) => {
       return res.status(400).json({ error: e.message });
     }
 
-    // 7. Determine if we should update images
+    // 8. Determine if we should update images
     console.log('[UPDATE DAY] Determining if images should be updated:');
     console.log(`  - keepImages !== null: ${keepImages !== null}`);
     console.log(`  - removeImages !== null: ${removeImages !== null}`);
@@ -525,7 +540,7 @@ export const updateDay = async (req, res) => {
     if (shouldUpdateImages) {
       console.log('[UPDATE DAY] Processing image updates...');
       
-      // 8. Start with keep_images OR existing images if keep_images not provided
+      // 9. Start with keep_images OR existing images if keep_images not provided
       if (keepImages !== null) {
         // keep_images was explicitly provided, use it (even if empty)
         console.log(`[UPDATE DAY] Using explicit keep_images: ${keepImages.length} URL(s)`);
@@ -552,13 +567,9 @@ export const updateDay = async (req, res) => {
         if (dayToUpdate.images && Array.isArray(dayToUpdate.images)) {
           console.log(`[UPDATE DAY] Processing ${dayToUpdate.images.length} existing images...`);
           finalImages = dayToUpdate.images.map((img, idx) => {
-            let url = null;
-            if (typeof img === 'string') {
-              url = img;
-              console.log(`[UPDATE DAY] Existing image[${idx}] is string: ${url}`);
-            } else if (img && img.imageUrl) {
-              url = img.imageUrl;
-              console.log(`[UPDATE DAY] Existing image[${idx}] is object with imageUrl: ${url}`);
+            const url = normalizeToUrl(img);
+            if (url) {
+              console.log(`[UPDATE DAY] Existing image[${idx}] normalized to: ${url}`);
             } else {
               console.log(`[UPDATE DAY] Existing image[${idx}] is invalid format:`, img);
             }
@@ -583,7 +594,7 @@ export const updateDay = async (req, res) => {
         }
       }
 
-      // 9. Remove URLs listed in remove_images
+      // 10. Remove URLs listed in remove_images
       if (removeImages && removeImages.length > 0) {
         console.log(`[UPDATE DAY] Processing remove_images: ${removeImages.length} URL(s) to remove`);
         const beforeCount = finalImages.length;
@@ -605,7 +616,7 @@ export const updateDay = async (req, res) => {
         console.log(`[UPDATE DAY] Removed ${removedCount} image(s), ${finalImages.length} remaining`);
       }
 
-      // 10. Upload new files and append to finalImages
+      // 11. Upload new files and append to finalImages
       if (req.files && req.files.images) {
         const imageFiles = Array.isArray(req.files.images)
           ? req.files.images
@@ -637,7 +648,7 @@ export const updateDay = async (req, res) => {
         }
       }
 
-      // 11. Set images ONLY ONCE in the correct format
+      // 12. Set images in the correct MongoDB schema format: [{ imageUrl: string }]
       console.log(`[UPDATE DAY] About to set images. finalImages array has ${finalImages.length} URL(s)`);
       if (finalImages.length > 0) {
         console.log('[UPDATE DAY] finalImages before mapping:', JSON.stringify(finalImages, null, 2));
@@ -654,7 +665,7 @@ export const updateDay = async (req, res) => {
       console.log(`[UPDATE DAY] Existing images count: ${dayToUpdate.images?.length || 0}`);
     }
 
-    // 12. Update other fields (allow partial updates)
+    // 13. Update other fields (allow partial updates)
     const updatedFields = [];
     if (req.body.title !== undefined) {
       dayToUpdate.title = req.body.title;
@@ -673,11 +684,11 @@ export const updateDay = async (req, res) => {
       console.log(`[UPDATE DAY] Updated fields: ${updatedFields.join(', ')}`);
     }
 
-    // 13. Save to database
+    // 14. Save to database (saves the day safely without unintended deletions)
     await itinerary.save();
     console.log(`[UPDATE DAY] ✓ Day updated successfully in database`);
 
-    // 14. Return success response
+    // 15. Return success response
     res.json({
       success: true,
       day: dayToUpdate,
@@ -716,52 +727,7 @@ export const removeDay = async (req, res) => {
 };
 
 
-/**
- * Reorder itinerary days
- * 
- * @route PUT /api/itineraries/:id/days/reorder
- * 
- * @body {
- *   days: Array<{
- *     _id: string,              // Required - MongoDB ObjectId
- *     title: string,            // Optional
- *     description: string,      // Required
- *     location: string,         // Optional
- *     images: Array<{           // Optional - Array of image objects
- *       imageUrl: string        // Cloudinary URL (NOT base64)
- *     }>
- *   }>
- * }
- * 
- * ⚠️ IMPORTANT - Frontend developers:
- * - Send ONLY the day objects, not images as separate items
- * - Images must be inside the day object's 'images' array
- * - Image URLs should be Cloudinary URLs, NOT base64 strings
- * - Base64 strings will be rejected
- * 
- * ✅ Correct structure:
- * {
- *   "days": [
- *     {
- *       "_id": "507f1f77bcf86cd799439011",
- *       "title": "Day 1",
- *       "description": "Arrival day",
- *       "location": "Kathmandu",
- *       "images": [
- *         { "imageUrl": "https://res.cloudinary.com/..." }
- *       ]
- *     }
- *   ]
- * }
- * 
- * ❌ Wrong structure (mixing days with base64):
- * {
- *   "days": [
- *     { "_id": "...", "title": "Day 1" },
- *     "data:image/png;base64,iVBORw0KG..."  ← This will be rejected
- *   ]
- * }
- */
+
 export const reorderDays = async (req, res) => {
   try {
     const { days } = req.body;
