@@ -2,7 +2,7 @@ import jwt from "jsonwebtoken";
 
 export const verifyAdmin = async (req, res, next) => {
   try {
-    // Get token from header
+    // Get token from header 
     const token = req.headers.authorization?.split(" ")[1]; // Bearer <token>
     
     if (!token) {
@@ -12,7 +12,7 @@ export const verifyAdmin = async (req, res, next) => {
       });
     }
 
-    // Verify token
+    // Verify token for the users
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.adminId = decoded.id;
     
