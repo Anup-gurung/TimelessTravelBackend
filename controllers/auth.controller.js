@@ -2,6 +2,7 @@ import Admin from "../models/Admin.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
+// func to signup Admin
 export const signupAdmin = async (req, res) => {
   try {
     // 1. Pull values from req.body
