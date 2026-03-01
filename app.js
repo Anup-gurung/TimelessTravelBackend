@@ -2,6 +2,7 @@
 import express from "express";
 import cors from "cors";
 
+// routing
 import adminRoute from "./routes/auth.routes.js";
 import ItineraryRoute from "./routes/itinerary.auth.js";
 import galleryRouter from "./routes/gallery.route.js";
