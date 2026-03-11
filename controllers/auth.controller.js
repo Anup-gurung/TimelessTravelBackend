@@ -95,7 +95,7 @@ export const getAllAdmins = async (req, res) => {
       admins: admins.map(admin => ({
         id: admin._id,
         username: admin.username,
-        email: admin.email, // Check if this comes back as undefined!
+        email: admin.email, // Check if this comes back as undefined! if not res is returned
         passwordHash: admin.password, // Useful for debugging
         createdAt: admin.createdAt
       }))
